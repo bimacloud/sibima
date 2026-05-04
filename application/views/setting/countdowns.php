@@ -33,8 +33,7 @@
                   <td class="border px-4 py-2"><?= date('d-m-Y H:i:s', strtotime($c->waktu_target)) ?></td>
                   <td class="border px-4 py-2"><?= date('d-m-Y H:i:s', strtotime($c->created_at)) ?></td>
                   <td class="border px-4 py-2 space-x-2">
-                    <a href="<?= base_url('setting/edit/'.$c->id) ?>" class="text-blue-600 hover:underline">Edit</a>
-                    <a href="<?= base_url('setting/delete/'.$c->id) ?>" onclick="return confirm('Yakin ingin hapus?')" class="text-red-600 hover:underline">Hapus</a>
+                    <a href="<?= base_url('setting/edit/'.$c->id) ?>" class="text-blue-600 hover:underline">Edit</a>                    
                   </td>
                 </tr>
                 <?php endforeach; ?>
