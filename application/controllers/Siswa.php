@@ -276,7 +276,7 @@ class Siswa extends CI_Controller {
                 $php_bin = '/opt/lampp/bin/php';
             }
             
-            $cmd = "{$php_bin} " . escapeshellarg(FCPATH . "index.php") . " skl_generator generate_pengumuman_batch " . escapeshellarg($mode) . " > /dev/null 2>&1 &";
+            $cmd = "cd " . escapeshellarg(FCPATH) . " && {$php_bin} index.php skl_generator generate_pengumuman_batch " . escapeshellarg($mode) . " > /dev/null 2>&1 &";
             
             $msg_cmd = "[{$date}] [INFO] Menjalankan command background: {$cmd}" . PHP_EOL;
             file_put_contents($log_file, $msg_cmd, FILE_APPEND);
