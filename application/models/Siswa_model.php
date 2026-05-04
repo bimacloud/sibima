@@ -23,6 +23,11 @@ class Siswa_model extends CI_Model {
         return $this->db->delete('siswa');
     }
 
+    public function delete_all() {
+        $this->db->empty_table('nilai_siswa');
+        return $this->db->empty_table('siswa');
+    }
+
     // Get by ID
     public function get_by_id($id) {
         return $this->db->get_where('siswa', ['id' => $id])->row();

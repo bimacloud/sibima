@@ -206,7 +206,13 @@ class Siswa extends CI_Controller {
         redirect('siswa');
     }
 
-    
+    public function delete_all()
+    {
+        $this->Siswa_model->delete_all();
+        $this->session->set_flashdata('import_success', "Semua data siswa berhasil dihapus.");
+        redirect('siswa');
+    }
+
     public function test_word()
     {
         $phpWord = new PhpWord();
