@@ -256,7 +256,6 @@
                 <div class="status-badge status-lulus">
                     <i class="fas fa-check-circle status-icon"></i> LULUS
                 </div>
-                
                 <a href="<?= base_url('skl/download_skl/' . $siswa->token_download) ?>" class="btn-download" id="downloadBtn">
                     <i class="fas fa-cloud-download-alt"></i> Unduh Surat Kelulusan (PDF)
                 </a>

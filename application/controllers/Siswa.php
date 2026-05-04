@@ -230,6 +230,8 @@ class Siswa extends CI_Controller {
         $status = $this->Batch_model->get_status();
 
         if ($status && $status->status == 'processing') {
+            @ob_clean();
+            header('Content-Type: application/json');
             echo json_encode(['status' => 'error', 'message' => 'Proses generate sedang berjalan!']);
             return;
         }
@@ -240,16 +242,22 @@ class Siswa extends CI_Controller {
         // Buat folder log jika belum ada
         $log_dir = FCPATH . "application/logs/batch/";
         if (!is_dir($log_dir)) {
-            mkdir($log_dir, 0755, true);
+            mkdir($log_dir, 0777, true);
+            chmod($log_dir, 0777);
         }
         $log_file = $log_dir . "generate_" . date('Y_m_d') . ".log";
         $date = date('Y-m-d H:i:s');
         
         $msg = "[{$date}] [INFO] Request batch generate dimulai dengan mode: {$mode}" . PHP_EOL;
         file_put_contents($log_file, $msg, FILE_APPEND);
+        chmod($log_file, 0777);
 
-        // Segera kunci database menjadi "processing" dengan progress 0 agar UI tidak melihat status 'completed' yang lama
-        $this->Batch_model->update_status(['status' => 'processing', 'progress' => 0]);
+        // Ambil total siswa untuk update status di database secara langsung
+        $this->load->model('Siswa_model');
+        $total_siswa = $this->Siswa_model->count_all();
+
+        // Segera kunci database menjadi "processing" dengan progress 0 dan total yang benar agar UI tidak melihat status 'completed' yang lama
+        $this->Batch_model->update_status(['status' => 'processing', 'progress' => 0, 'total' => $total_siswa]);
 
         $isWindows = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN';
         if ($isWindows) {
@@ -272,9 +280,11 @@ class Siswa extends CI_Controller {
             
             $msg_cmd = "[{$date}] [INFO] Menjalankan command background: {$cmd}" . PHP_EOL;
             file_put_contents($log_file, $msg_cmd, FILE_APPEND);
-            exec($cmd);
+            pclose(popen($cmd, "r"));
         }
 
+        @ob_clean();
+        header('Content-Type: application/json');
         echo json_encode(['status' => 'success', 'message' => 'Proses Batch Generate PDF telah dimulai di background.']);
     }
 

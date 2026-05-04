@@ -23,7 +23,8 @@ class Skl_generator extends CI_Controller {
     {
         $log_dir = FCPATH . "application/logs/batch/";
         if (!is_dir($log_dir)) {
-            mkdir($log_dir, 0755, true);
+            mkdir($log_dir, 0777, true);
+            chmod($log_dir, 0777);
         }
         return $log_dir . "generate_" . date('Y_m_d') . ".log";
     }
@@ -36,6 +37,7 @@ class Skl_generator extends CI_Controller {
         
         // Write to file
         @file_put_contents($file, $formatted_message, FILE_APPEND);
+        @chmod($file, 0777);
         
         // Output to CLI as well
         echo $formatted_message;
@@ -80,13 +82,15 @@ class Skl_generator extends CI_Controller {
         $tahun = date('Y');
         $upload_dir = FCPATH . "uploads/pengumuman/{$tahun}/";
         if (!is_dir($upload_dir)) {
-            mkdir($upload_dir, 0755, true);
+            mkdir($upload_dir, 0777, true);
+            chmod($upload_dir, 0777);
         }
 
         // Buat folder temp spesifik CLI agar tidak bertabrakan
         $cli_temp_dir = FCPATH . "temp/cli_batch/";
         if (!is_dir($cli_temp_dir)) {
-            mkdir($cli_temp_dir, 0755, true);
+            mkdir($cli_temp_dir, 0777, true);
+            chmod($cli_temp_dir, 0777);
         }
 
         // Jika mode overwrite, hapus semua file PDF yang ada di dalam folder tersebut sebelum jalan
@@ -108,46 +112,118 @@ class Skl_generator extends CI_Controller {
 
         $this->write_log("Ditemukan {$total} siswa. Menyiapkan konversi PDF tahun {$tahun}...");
 
-        // 4. Looping Semua Siswa
-        foreach ($all_siswa as $siswa) {
+        $chunks = array_chunk($all_siswa, 25);
 
+        foreach ($chunks as $chunk) {
             // Cek apakah perintah stop dijalankan dari admin secara dinamis
             $current_status = $this->Batch_model->get_status();
             if ($current_status && $current_status->status == 'stopped') {
-                $this->write_log("Proses dihentikan paksa oleh Admin pada siswa NIS: {$siswa->nis}", "WARNING");
+                $this->write_log("Proses dihentikan paksa oleh Admin.", "WARNING");
                 break;
             }
 
-            $pdfFileName = "skl_{$siswa->nis}.pdf";
-            $pdfOutput   = $upload_dir . $pdfFileName;
+            // Siapkan Word files untuk semua siswa dalam chunk ini
+            $chunk_word_files = [];
+            $chunk_skipped = 0;
+            $chunk_siswa_processed = [];
 
-            // Jika PDF sudah ada (mode skip, atau terlewat saat hapus), skip saja
-            if (file_exists($pdfOutput)) {
-                $processed++;
-                $sukses++;
-                $this->update_progress($processed, $total);
-                continue; 
+            foreach ($chunk as $siswa) {
+                $pdfFileName = "skl_{$siswa->nis}.pdf";
+                $pdfOutput   = $upload_dir . $pdfFileName;
+
+                // Jika PDF sudah ada, skip saja
+                if (file_exists($pdfOutput) && $mode === 'skip') {
+                    $chunk_skipped++;
+                    $sukses++;
+                    $processed++;
+                    continue; 
+                }
+
+                $docxPath = $cli_temp_dir . "skl_{$siswa->nis}.docx";
+
+                try {
+                    $templateProcessor = new TemplateProcessor($templatePath);
+                    $templateProcessor->setValue('nama_lengkap', $siswa->nama_lengkap);
+                    $templateProcessor->setValue('nis', $siswa->nis);
+                    $templateProcessor->setValue('nisn', $siswa->nisn);
+                    $templateProcessor->setValue('kelas', $siswa->kelas);
+                    $templateProcessor->setValue('no_ujian', $siswa->no_ujian);
+                    $templateProcessor->setValue('tempat_lahir', $siswa->tempat_lahir ?? '-');
+
+                    $statusRichText = new \PhpOffice\PhpWord\Element\TextRun();
+                    if (strtolower($siswa->status) === 'lulus') {
+                        $statusRichText->addText('LULUS', ['bold' => true]);
+                        $statusRichText->addText(' / ', []);
+                        $statusRichText->addText('TIDAK LULUS', ['strikethrough' => true, 'color' => '888888']);
+                    } else {
+                        $statusRichText->addText('LULUS', ['strikethrough' => true, 'color' => '888888']);
+                        $statusRichText->addText(' / ', []);
+                        $statusRichText->addText('TIDAK LULUS', ['bold' => true]);
+                    }
+                    $templateProcessor->setComplexValue('status_lulus_rich', $statusRichText);
+                    $templateProcessor->saveAs($docxPath);
+                    @chmod($docxPath, 0777);
+
+                    $chunk_word_files[] = $docxPath;
+                    $chunk_siswa_processed[] = $siswa;
+                } catch (Exception $e) {
+                    $this->write_log("Error Word: " . $e->getMessage(), "ERROR");
+                    $gagal++;
+                    $processed++;
+                }
             }
 
-            // Call method internal directly to ensure it works on both local and hosting
-            ob_start();
-            $this->process_single($siswa->nis, $mode);
-            $result = trim(ob_get_clean());
+            if (!empty($chunk_word_files)) {
+                // Convert chunk of word files to PDF at once
+                if ($isWindows) {
+                    $sofficePath = '"C:\Program Files\LibreOffice\program\soffice.exe"';
+                    $file_list = implode(' ', array_map('escapeshellarg', $chunk_word_files));
+                    $cmd = $sofficePath . ' --headless --invisible --nologo --nodefault --convert-to pdf ' . $file_list . ' --outdir ' . escapeshellarg($upload_dir);
+                    exec($cmd, $output, $returnCode);
+                } else {
+                    if (file_exists('/opt/libreoffice6.4/program/soffice')) {
+                        $sofficeOptPath = '/opt/libreoffice6.4/program/soffice';
+                    } elseif (file_exists('/usr/bin/libreoffice')) {
+                        $sofficeOptPath = '/usr/bin/libreoffice';
+                    } elseif (file_exists('/usr/bin/soffice')) {
+                        $sofficeOptPath = '/usr/bin/soffice';
+                    } else {
+                        $sofficeOptPath = 'libreoffice';
+                    }
+                    $loProfile = $cli_temp_dir . "lo_profile_chunk_" . rand(100, 999);
+                    
+                    $file_list = implode(' ', array_map('escapeshellarg', $chunk_word_files));
+                    $cmd = "env LD_LIBRARY_PATH=\"\" " . escapeshellcmd($sofficeOptPath) . " -env:UserInstallation=file://" . escapeshellarg($loProfile) . " --headless --invisible --nologo --nodefault --convert-to pdf " . $file_list . " --outdir " . escapeshellarg($upload_dir) . " 2>&1";
+                    
+                    shell_exec($cmd);
 
-            if (strpos($result, "Success") !== false || strpos($result, "Skipped") !== false) {
-                $sukses++;
-            } else {
-                $this->write_log("Gagal konversi PDF: NIS {$siswa->nis}. Reason: {$result}", "ERROR");
-                $gagal++;
-            } 
+                    if (is_dir($loProfile)) {
+                        shell_exec("rm -rf " . escapeshellarg($loProfile));
+                    }
+                }
 
-            // Update counter
-            $processed++;
+                // Delete temporary docx files and update counters
+                foreach ($chunk_siswa_processed as $siswa) {
+                    $pdfFileName = "skl_{$siswa->nis}.pdf";
+                    $pdfOutput   = $upload_dir . $pdfFileName;
+                    $docxPath    = $cli_temp_dir . "skl_{$siswa->nis}.docx";
 
-            // Update status ke Database kelipatan 5 (Agar I/O DB ringan) atau saat record terakhir
-            if ($processed % 5 == 0 || $processed == $total) {
-                $this->update_progress($processed, $total);
+                    if (file_exists($docxPath)) {
+                        unlink($docxPath);
+                    }
+
+                    if (file_exists($pdfOutput)) {
+                        $sukses++;
+                    } else {
+                        $this->write_log("Gagal konversi PDF untuk NIS: {$siswa->nis}", "ERROR");
+                        $gagal++;
+                    }
+                    $processed++;
+                }
             }
+
+            // Update status ke Database setelah setiap chunk
+            $this->update_progress($processed, $total);
         }
 
         // Tandai Selesai

@@ -252,7 +252,13 @@
               $('#stopPdfBtn').show();
               
               $.post('<?= base_url("siswa/trigger_pdf_batch") ?>', { mode: mode }, function(res) {
-                  const data = JSON.parse(res);
+                  let data;
+                  try {
+                      data = typeof res === 'object' ? res : JSON.parse(res);
+                  } catch (e) {
+                      console.error('Invalid JSON response:', res);
+                      data = { status: 'success' }; // fallback
+                  }
                   if(data.status === 'success') {
                       Swal.fire({
                           title: 'Berhasil!',
@@ -263,7 +269,7 @@
                       });
                       checkProgress(); // Mulai polling
                   } else {
-                      alert(data.message);
+                      alert(data.message || 'Terjadi kesalahan pada server.');
                       $('#progressSection').hide();
                       $('#generatePdfBtn').prop('disabled', false).html('<i class="fas fa-file-pdf"></i> Generate Pengumuman Batch');
                       $('#stopPdfBtn').hide();
